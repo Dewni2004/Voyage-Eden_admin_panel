@@ -53,10 +53,8 @@ const Admin = () => {
   const [publishedHotels, setPublishedHotels] = useState([]);
   const [editingHotelId, setEditingHotelId] = useState(null);
   const [hotelForm, setHotelForm] = useState({
-    name: '', stars: 5, location: '', description: '', image: '', category: '',
-    amenities: [],
-    extendedAmenities: { popular: [], categories: [] },
-    categorizedGallery: []
+    name: '', stars: 5, location: '', description: '', image: '', category: 'exclusive',
+    amenities: [], extendedAmenities: { popular: [], categories: [] }, categorizedGallery: []
   });
 
   const [contentLoading, setContentLoading] = useState(false);
@@ -162,29 +160,13 @@ const Admin = () => {
     if (isAuthenticated) fetchContent();
   }, [isAuthenticated]);
 
-  const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
-  const translateText = async (text, sl = 'fr', tl = 'de', retries = 1) => {
+  const translateText = async (text, sl = 'fr', tl = 'de') => {
     if (!text || typeof text !== 'string') return text;
     try {
-      await sleep(100); 
       const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`);
-      if (res.status === 429) {
-        throw new Error('RATE_LIMIT');
-      }
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
       const data = await res.json();
       return data[0].map(item => item[0]).join('');
     } catch (e) {
-      if (e.message === 'RATE_LIMIT') {
-        alert("Google Translate එකෙන් ඔයාව තාවකාලිකව block කරලා තියෙන්නේ. (Too many requests). කරුණාකර විනාඩි 10ක් විතර ඉඳලා ආයෙත් try කරන්න.");
-        throw e;
-      }
-      if (retries > 0) {
-        console.warn("Translation failed, retrying after 1s...", e);
-        await sleep(1000);
-        return translateText(text, sl, tl, retries - 1);
-      }
       console.error("Translation error", e);
       return text;
     }
@@ -278,7 +260,7 @@ const Admin = () => {
       const frData = { 
         ...itineraryForm, 
         days: itineraryDays,
-        icons: (itineraryForm.icons || '').split(',').map(i => i.trim()).filter(i => i !== '')
+        icons: itineraryForm.icons.split(',').map(i => i.trim()).filter(i => i !== '')
       };
       
       let newFrId = editingItineraryId;
@@ -288,50 +270,32 @@ const Admin = () => {
         newFrId = await addItinerary(frData);
       }
 
-      const translateItinerarySeq = async (sourceData, sl, tl) => {
-        const result = {
-          ...sourceData,
-          title: await translateText(sourceData.title, sl, tl),
-          description: await translateText(sourceData.description, sl, tl),
-          effort: await translateText(sourceData.effort, sl, tl),
-          group: await translateText(sourceData.group, sl, tl),
-          seo_title: await translateText(sourceData.seo_title, sl, tl),
-          seo_description: await translateText(sourceData.seo_description, sl, tl),
-          seo_keywords: await translateText(sourceData.seo_keywords, sl, tl),
-          days: []
+      const deData = { ...frData, id: newFrId };
+      deData.title = await translateText(frData.title);
+      deData.description = await translateText(frData.description);
+      deData.effort = await translateText(frData.effort);
+      deData.group = await translateText(frData.group);
+      deData.seo_title = await translateText(frData.seo_title);
+      deData.seo_description = await translateText(frData.seo_description);
+      deData.seo_keywords = await translateText(frData.seo_keywords);
+
+      deData.days = await Promise.all(frData.days.map(async (day) => {
+        return {
+          ...day,
+          location: await translateText(day.location),
+          description: await translateText(day.description),
+          highlights: await translateText(day.highlights),
+          accommodation: await translateText(day.accommodation),
+          meals: await translateText(day.meals),
+          travel: await translateText(day.travel),
+          displayLabel: await translateText(day.displayLabel)
         };
-        for (const day of sourceData.days || []) {
-          result.days.push({
-            ...day,
-            location: await translateText(day.location, sl, tl),
-            description: await translateText(day.description, sl, tl),
-            highlights: await translateText(day.highlights, sl, tl),
-            accommodation: await translateText(day.accommodation, sl, tl),
-            meals: await translateText(day.meals, sl, tl),
-            travel: await translateText(day.travel, sl, tl),
-            displayLabel: await translateText(day.displayLabel, sl, tl)
-          });
-        }
-        return result;
-      };
+      }));
 
-      const deData = await translateItinerarySeq(frData, 'fr', 'de');
-      deData.id = newFrId;
-      await supabase.from('itineraries_de').upsert(deData);
+      const { error: err } = await supabase.from('itineraries_de').upsert(deData);
+      if (err) throw err;
 
-      const enData = await translateItinerarySeq(frData, 'fr', 'en');
-      enData.id = newFrId;
-      await supabase.from('itineraries_en').upsert(enData);
-
-      const itData = await translateItinerarySeq(frData, 'fr', 'it');
-      itData.id = newFrId;
-      await supabase.from('itineraries_it').upsert(itData);
-
-      const esData = await translateItinerarySeq(frData, 'fr', 'es');
-      esData.id = newFrId;
-      await supabase.from('itineraries_es').upsert(esData);
-
-      setMessage({ type: 'success', text: 'Itinéraire publié en FR et traduit/publié en toutes les langues !' });
+      setMessage({ type: 'success', text: 'Itinéraire publié en FR et traduit/publié en DE !' });
       resetItineraryForm();
       fetchContent();
       setActiveTab('itineraries');
@@ -609,64 +573,42 @@ const Admin = () => {
   };
 
   const handleEnglishToBothReview = async () => {
-    if (!reviewForm.name) {
-      setMessage({ type: 'error', text: 'Name required.' });
-      return;
-    }
+    if (!reviewForm.title) return;
     setLoading(true);
     setIsTranslating(true);
-    setMessage({ type: '', text: 'Translating and Publishing...' });
+    setMessage({ type: '', text: '' });
     try {
-      const baseData = { ...reviewForm };
+      // 1. Translate EN to FR and save to FR Database
+      const frForm = { ...reviewForm };
+      frForm.title = await translateText(reviewForm.title, 'en', 'fr');
+      frForm.review = await translateText(reviewForm.review, 'en', 'fr');
+      frForm.excerpt = await translateText(reviewForm.excerpt, 'en', 'fr');
+      frForm.tourdetails.type = await translateText(reviewForm.tourdetails.type, 'en', 'fr');
+      frForm.tourdetails.duration = await translateText(reviewForm.tourdetails.duration, 'en', 'fr');
+      frForm.tourdetails.group = await translateText(reviewForm.tourdetails.group, 'en', 'fr');
+      frForm.guide.quote = await translateText(reviewForm.guide.quote, 'en', 'fr');
 
-      // Helper function for translating review specific fields
-      const translateReview = async (sl, tl) => {
-        return {
-          ...baseData,
-          headline: await translateText(reviewForm.headline, sl, tl),
-          text: await translateText(reviewForm.text, sl, tl),
-          detailedtext: await translateText(reviewForm.detailedtext, sl, tl),
-          tourdetails: {
-            ...reviewForm.tourdetails,
-            travelertype: await translateText(reviewForm.tourdetails.travelertype, sl, tl),
-            group: await translateText(reviewForm.tourdetails.group, sl, tl)
-          },
-          guide: {
-            ...reviewForm.guide,
-            quote: await translateText(reviewForm.guide.quote, sl, tl)
-          }
-        };
-      };
-
-      // 1. FR Database (base table)
-      const frForm = await translateReview('en', 'fr');
-      let newId = editingReviewId;
+      let newFrId = editingReviewId;
       if (editingReviewId) {
         await updateReview(editingReviewId, frForm);
       } else {
-        newId = await addReview(frForm);
+        newFrId = await addReview(frForm);
       }
 
-      // 2. EN Database
-      const enForm = { ...baseData, id: newId };
-      await supabase.from('reviews_en').upsert(enForm);
+      // 2. Translate EN to DE and save to DE Database
+      const deForm = { ...frForm, id: newFrId };
+      deForm.title = await translateText(reviewForm.title, 'en', 'de');
+      deForm.review = await translateText(reviewForm.review, 'en', 'de');
+      deForm.excerpt = await translateText(reviewForm.excerpt, 'en', 'de');
+      deForm.tourdetails.type = await translateText(reviewForm.tourdetails.type, 'en', 'de');
+      deForm.tourdetails.duration = await translateText(reviewForm.tourdetails.duration, 'en', 'de');
+      deForm.tourdetails.group = await translateText(reviewForm.tourdetails.group, 'en', 'de');
+      deForm.guide.quote = await translateText(reviewForm.guide.quote, 'en', 'de');
 
-      // 3. DE Database
-      const deForm = await translateReview('en', 'de');
-      deForm.id = newId;
-      await supabase.from('reviews_de').upsert(deForm);
+      const { error: err } = await supabase.from('reviews_de').upsert(deForm);
+      if (err) throw err;
 
-      // 4. IT Database
-      const itForm = await translateReview('en', 'it');
-      itForm.id = newId;
-      await supabase.from('reviews_it').upsert(itForm);
-
-      // 5. ES Database
-      const esForm = await translateReview('en', 'es');
-      esForm.id = newId;
-      await supabase.from('reviews_es').upsert(esForm);
-
-      setMessage({ type: 'success', text: 'Avis publié en toutes les langues depuis l\'Anglais !' });
+      setMessage({ type: 'success', text: 'Avis publié en FR et DE depuis l\'Anglais !' });
       resetReviewForm();
       fetchContent();
       setActiveTab('reviews');
@@ -683,69 +625,66 @@ const Admin = () => {
     if (!itineraryForm.title) return;
     setLoading(true);
     setIsTranslating(true);
-    setMessage({ type: '', text: 'Translating and Publishing...' });
+    setMessage({ type: '', text: '' });
     try {
-      const baseData = { 
+      // 1. Translate EN to FR and save to FR Database
+      const frData = { 
         ...itineraryForm,
         icons: (itineraryForm.icons || '').split(',').map(i => i.trim()).filter(i => i !== '') 
       };
-
-      const translateItinerary = async (sl, tl) => {
-        const result = {
-          ...baseData,
-          title: await translateText(itineraryForm.title, sl, tl),
-          description: await translateText(itineraryForm.description, sl, tl),
-          effort: await translateText(itineraryForm.effort, sl, tl),
-          group: await translateText(itineraryForm.group, sl, tl),
-          seo_title: await translateText(itineraryForm.seo_title, sl, tl),
-          seo_description: await translateText(itineraryForm.seo_description, sl, tl),
-          seo_keywords: await translateText(itineraryForm.seo_keywords, sl, tl),
-          days: []
+      frData.title = await translateText(itineraryForm.title, 'en', 'fr');
+      frData.description = await translateText(itineraryForm.description, 'en', 'fr');
+      frData.effort = await translateText(itineraryForm.effort, 'en', 'fr');
+      frData.group = await translateText(itineraryForm.group, 'en', 'fr');
+      frData.seo_title = await translateText(itineraryForm.seo_title, 'en', 'fr');
+      frData.seo_description = await translateText(itineraryForm.seo_description, 'en', 'fr');
+      frData.seo_keywords = await translateText(itineraryForm.seo_keywords, 'en', 'fr');
+      frData.days = await Promise.all(itineraryDays.map(async (day) => {
+        return {
+          ...day,
+          location: await translateText(day.location, 'en', 'fr'),
+          description: await translateText(day.description, 'en', 'fr'),
+          highlights: await translateText(day.highlights, 'en', 'fr'),
+          accommodation: await translateText(day.accommodation, 'en', 'fr'),
+          meals: await translateText(day.meals, 'en', 'fr'),
+          travel: await translateText(day.travel, 'en', 'fr'),
+          displayLabel: await translateText(day.displayLabel, 'en', 'fr')
         };
-        for (const day of itineraryDays) {
-          result.days.push({
-            ...day,
-            location: await translateText(day.location, sl, tl),
-            description: await translateText(day.description, sl, tl),
-            highlights: await translateText(day.highlights, sl, tl),
-            accommodation: await translateText(day.accommodation, sl, tl),
-            meals: await translateText(day.meals, sl, tl),
-            travel: await translateText(day.travel, sl, tl),
-            displayLabel: await translateText(day.displayLabel, sl, tl)
-          });
-        }
-        return result;
-      };
+      }));
 
-      // 1. FR Database (base table)
-      const frData = await translateItinerary('en', 'fr');
-      let newId = editingItineraryId;
+      let newFrId = editingItineraryId;
       if (editingItineraryId) {
         await updateItinerary(editingItineraryId, frData);
       } else {
-        newId = await addItinerary(frData);
+        newFrId = await addItinerary(frData);
       }
 
-      // 2. EN Database
-      const enData = { ...baseData, id: newId, days: itineraryDays };
-      await supabase.from('itineraries_en').upsert(enData);
+      // 2. Translate EN to DE and save to DE Database
+      const deData = { ...frData, id: newFrId };
+      deData.title = await translateText(itineraryForm.title, 'en', 'de');
+      deData.description = await translateText(itineraryForm.description, 'en', 'de');
+      deData.effort = await translateText(itineraryForm.effort, 'en', 'de');
+      deData.group = await translateText(itineraryForm.group, 'en', 'de');
+      deData.seo_title = await translateText(itineraryForm.seo_title, 'en', 'de');
+      deData.seo_description = await translateText(itineraryForm.seo_description, 'en', 'de');
+      deData.seo_keywords = await translateText(itineraryForm.seo_keywords, 'en', 'de');
+      deData.days = await Promise.all(itineraryDays.map(async (day) => {
+        return {
+          ...day,
+          location: await translateText(day.location, 'en', 'de'),
+          description: await translateText(day.description, 'en', 'de'),
+          highlights: await translateText(day.highlights, 'en', 'de'),
+          accommodation: await translateText(day.accommodation, 'en', 'de'),
+          meals: await translateText(day.meals, 'en', 'de'),
+          travel: await translateText(day.travel, 'en', 'de'),
+          displayLabel: await translateText(day.displayLabel, 'en', 'de')
+        };
+      }));
 
-      // 3. DE Database
-      const deData = await translateItinerary('en', 'de');
-      deData.id = newId;
-      await supabase.from('itineraries_de').upsert(deData);
+      const { error: err } = await supabase.from('itineraries_de').upsert(deData);
+      if (err) throw err;
 
-      // 4. IT Database
-      const itData = await translateItinerary('en', 'it');
-      itData.id = newId;
-      await supabase.from('itineraries_it').upsert(itData);
-
-      // 5. ES Database
-      const esData = await translateItinerary('en', 'es');
-      esData.id = newId;
-      await supabase.from('itineraries_es').upsert(esData);
-
-      setMessage({ type: 'success', text: 'Itinéraire publié en toutes les langues depuis l\'Anglais !' });
+      setMessage({ type: 'success', text: 'Itinéraire publié en FR et DE depuis l\'Anglais !' });
       resetItineraryForm();
       fetchContent();
       setActiveTab('itineraries');
@@ -761,7 +700,7 @@ const Admin = () => {
   
   const resetHotelForm = () => {
     setHotelForm({
-      name: '', stars: 5, location: '', description: '', image: '', category: '',
+      name: '', stars: 5, location: '', description: '', image: '', category: 'luxury',
       amenities: [], extendedAmenities: { popular: [], categories: [] }, categorizedGallery: []
     });
     setEditingHotelId(null);
@@ -808,55 +747,15 @@ const Admin = () => {
         categories: hotelForm.extendedAmenities.categories
       };
 
-      const translateAmenities = async (sl, tl) => {
-        const translatedCategories = await Promise.all(hotelForm.extendedAmenities.categories.map(async (cat) => ({
-          icon: cat.icon,
-          title: await translateText(cat.title, sl, tl),
-          items: await Promise.all(cat.items.map(async (item) => await translateText(item, sl, tl)))
-        })));
-        return {
-          popular: translatedCategories.filter(cat => cat.title && cat.title.trim() !== '').map(cat => ({ icon: cat.icon, label: cat.title })),
-          categories: translatedCategories
-        };
-      };
-
-      // FR (base table 'hotels')
-      const frData = {
-        name: hotelForm.name,
-        location: hotelForm.location,
-        description: await translateText(hotelForm.description, 'auto', 'fr'),
-        stars: hotelForm.stars,
-        category: hotelForm.category,
-        image: hotelForm.image,
-        amenities: hotelForm.amenities,
-        extended_amenities: await translateAmenities('auto', 'fr'),
-        categorized_gallery: hotelForm.categorizedGallery
-      };
-
       // EN
-      const enData = { ...baseData, name: hotelForm.name, location: hotelForm.location, description: await translateText(hotelForm.description, 'auto', 'en') };
-      enData.extended_amenities = await translateAmenities('auto', 'en');
+      const enData = { ...baseData, name: await translateText(hotelForm.name, 'es', 'en'), location: await translateText(hotelForm.location, 'es', 'en'), description: await translateText(hotelForm.description, 'es', 'en') };
+      enData.extended_amenities = { popular: [], categories: [] }; // Simplified for brevity
       
-      // DE
-      const deData = { ...baseData, name: hotelForm.name, location: hotelForm.location, description: await translateText(hotelForm.description, 'auto', 'de') };
-      deData.extended_amenities = await translateAmenities('auto', 'de');
-      
-      // IT
-      const itData = { ...baseData, name: hotelForm.name, location: hotelForm.location, description: await translateText(hotelForm.description, 'auto', 'it') };
-      itData.extended_amenities = await translateAmenities('auto', 'it');
-      
-      // ES
-      const esData = { ...baseData, name: hotelForm.name, location: hotelForm.location, description: hotelForm.description };
-      esData.extended_amenities = combinedExtendedAmenities;
-
       let newId = editingHotelId;
-      if (editingHotelId) { await updateHotel(editingHotelId, frData); }
-      else { newId = await addHotel(frData); }
+      if (editingHotelId) { await updateHotel(editingHotelId, { ...hotelForm, extended_amenities: combinedExtendedAmenities }); }
+      else { newId = await addHotel({ ...hotelForm, extended_amenities: combinedExtendedAmenities }); }
       
-      await supabase.from('hotels_en').upsert({...enData, id: newId});
-      await supabase.from('hotels_de').upsert({...deData, id: newId});
-      await supabase.from('hotels_it').upsert({...itData, id: newId});
-      await supabase.from('hotels_es').upsert({...esData, id: newId});
+      const { error: errEn } = await supabase.from('hotels_en').upsert({...enData, id: newId});
       
       setMessage({ type: 'success', text: 'Hotel published!' });
       resetHotelForm();
@@ -873,63 +772,20 @@ const Admin = () => {
 
   const handleArticleSubmit = async (e) => {
     e.preventDefault();
-    if (!articleForm.title) return setMessage({ type: 'error', text: 'Article Title required.' });
-    setLoading(true); setIsTranslating(true); setMessage({ type: '', text: 'Translating and Publishing to all languages...' });
+    setLoading(true);
     try {
       const data = {
         ...articleForm,
         content: contentBlocks.filter(b => b.text.trim() !== ''),
         tags: articleForm.category ? [`#${articleForm.category.replace(/\s+/g, '')}`] : []
       };
-
-      const translateContent = async (blocks, tl) => {
-        return await Promise.all(blocks.map(async (block) => {
-          if (block.type !== 'image' && block.text) {
-            return { ...block, text: await translateText(block.text, 'auto', tl) };
-          }
-          return block;
-        }));
-      };
-
-      const baseData = {
-        image: articleForm.image,
-        category: articleForm.category,
-        author: articleForm.author,
-        date: articleForm.date,
-        tags: data.tags
-      };
-
-      const translateFullData = async (tl) => ({
-        ...baseData,
-        title: await translateText(articleForm.title, 'auto', tl),
-        description: await translateText(articleForm.description, 'auto', tl),
-        excerpt: await translateText(articleForm.excerpt, 'auto', tl),
-        seo_title: await translateText(articleForm.seo_title, 'auto', tl),
-        seo_description: await translateText(articleForm.seo_description, 'auto', tl),
-        seo_keywords: await translateText(articleForm.seo_keywords, 'auto', tl),
-        content: await translateContent(data.content, tl)
-      });
-
-      const frData = await translateFullData('fr');
-      const enData = await translateFullData('en');
-      const deData = await translateFullData('de');
-      const itData = await translateFullData('it');
-      const esData = await translateFullData('es');
-
-      let newId = editingArticleId;
       if (editingArticleId) {
-        await updateArticle(editingArticleId, frData);
-        setMessage({ type: 'success', text: 'Article updated & translated to all languages!' });
+        await updateArticle(editingArticleId, data);
+        setMessage({ type: 'success', text: 'Article updated successfully!' });
       } else {
-        newId = await addArticle(frData);
-        setMessage({ type: 'success', text: 'Article published & translated to all languages!' });
+        await addArticle(data);
+        setMessage({ type: 'success', text: 'Article published successfully!' });
       }
-
-      await supabase.from('articles_en').upsert({...enData, id: newId});
-      await supabase.from('articles_de').upsert({...deData, id: newId});
-      await supabase.from('articles_it').upsert({...itData, id: newId});
-      await supabase.from('articles_es').upsert({...esData, id: newId});
-
       resetArticleForm();
       fetchContent();
       setActiveTab('articles');
@@ -937,7 +793,7 @@ const Admin = () => {
       console.error(error);
       setMessage({ type: 'error', text: `Failed: ${error.message}` });
     }
-    setLoading(false); setIsTranslating(false);
+    setLoading(false);
   };
 
   const handleReviewSubmit = async (e) => {
@@ -1064,8 +920,8 @@ const Admin = () => {
     { id: 'new-article', label: editingArticleId ? 'Edit Article' : 'New Article', icon: '✍️' },
     { id: 'new-review', label: editingReviewId ? 'Edit Review' : 'New Review', icon: '✨' },
     { id: 'new-itinerary', label: editingItineraryId ? 'Edit Itinerary' : 'New Itinerary', icon: '📍' },
+    { id: 'interests', label: 'Interests', icon: '🎯', count: publishedCategories.length },
     { id: 'hotels', label: 'Hotels', icon: '🏨', count: publishedHotels.length },
-    { id: 'new-hotel', label: editingHotelId ? 'Edit Hotel' : 'New Hotel', icon: '➕' },
   ];
 
   const inputClass = "w-full bg-white border border-gray-100 rounded-2xl py-4 px-6 outline-none focus:ring-2 focus:ring-primary/20 transition-all text-primary font-medium placeholder:text-gray-300 shadow-sm";
@@ -1394,196 +1250,88 @@ const Admin = () => {
               </div>
             </div>
           )}
-
+          
           {activeTab === 'hotels' && (
-            <div className="animate-fade-in">
-              <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 px-4 gap-4">
-                <div>
-                  <h3 className="text-2xl font-serif font-bold text-primary mb-1">Luxury Hotels</h3>
-                  <p className="text-gray-400 text-sm font-medium">Manage your hotel listings</p>
-                </div>
-                <div className="flex flex-1 w-full md:w-auto max-w-md gap-4">
-                  <div className="relative flex-1">
-                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
-                    <input 
-                      type="text" 
-                      placeholder="Search hotels..." 
-                      value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
-                      className="w-full bg-white border border-gray-100 rounded-2xl py-3 pl-12 pr-6 outline-none focus:ring-2 focus:ring-primary/10 transition-all text-sm font-medium shadow-sm"
-                    />
-                  </div>
-                  <button onClick={() => { resetHotelForm(); setActiveTab('new-hotel'); }} className="bg-primary text-white font-bold px-8 py-3 rounded-2xl hover:bg-primary/90 transition-all shadow-xl shadow-primary/20 text-sm tracking-wide whitespace-nowrap">+ NEW HOTEL</button>
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-1 gap-4">
-                {contentLoading ? (
-                  <div className="flex flex-col items-center justify-center py-32 space-y-4">
-                    <div className="w-12 h-12 border-4 border-primary/20 border-t-primary rounded-full animate-spin"></div>
-                    <p className="text-gray-400 font-bold text-sm uppercase tracking-widest">Syncing with database...</p>
-                  </div>
-                ) : publishedHotels.filter(h => (h.name || '').toLowerCase().includes(searchQuery.toLowerCase())).map((h, i) => (
-                  <div key={i} className="bg-white p-4 rounded-3xl flex items-center gap-6 shadow-sm border border-gray-50 hover:shadow-md transition-all group">
-                    {h.image ? <img src={h.image} className="w-24 h-24 rounded-2xl object-cover" alt="" /> : <div className="w-24 h-24 rounded-2xl bg-gray-100"></div>}
-                    <div className="flex-1">
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="text-[10px] font-bold tracking-wider text-primary/60 bg-primary/5 px-2 py-1 rounded-full uppercase">{h.category}</span>
-                        <span className="text-xs text-gray-400 font-medium">{h.stars} Stars</span>
-                      </div>
-                      <h4 className="font-serif text-lg font-bold text-primary mb-1">{h.name}</h4>
-                      <p className="text-gray-400 text-sm font-medium">{h.location}</p>
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={() => handleEditHotel(h)} className="w-10 h-10 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center hover:bg-blue-500 hover:text-white transition-colors">✏️</button>
-                      <button onClick={() => handleDeleteHotel(h.id)} className="w-10 h-10 rounded-full bg-red-50 text-red-500 flex items-center justify-center hover:bg-red-500 hover:text-white transition-colors">🗑️</button>
-                    </div>
-                  </div>
-                ))}
-              </div>
+            <div className="bg-white rounded-3xl shadow-xl border border-gray-50 overflow-hidden">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-gray-50/50">
+                    <th className="p-6 font-bold text-gray-500 uppercase tracking-wider text-sm">Hotel</th>
+                    <th className="p-6 font-bold text-gray-500 uppercase tracking-wider text-sm">Category</th>
+                    <th className="p-6 font-bold text-gray-500 uppercase tracking-wider text-sm text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {publishedHotels.map((h, i) => (
+                    <tr key={i} className="hover:bg-gray-50/50 transition-colors">
+                      <td className="p-6">
+                        <div className="flex items-center gap-4">
+                          {h.image && <img src={h.image} className="w-12 h-12 rounded-xl object-cover" alt=""/>}
+                          <div>
+                            <div className="font-bold text-primary">{h.name}</div>
+                            <div className="text-sm text-gray-400">{h.location}</div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="p-6 text-gray-500">{h.category}</td>
+                      <td className="p-6">
+                        <div className="flex justify-end gap-2">
+                          <button onClick={() => handleEditHotel(h)} className="p-2 text-blue-500 hover:bg-blue-50 rounded-lg transition-colors">Edit</button>
+                          <button onClick={() => handleDeleteHotel(h.id)} className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors">Del</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           )}
 
-
+          
           {activeTab === 'new-hotel' && (
-            <div className="animate-slide-up">
-              <div className="bg-white p-12 md:p-16 rounded-[48px] shadow-2xl border border-gray-50 relative overflow-hidden">
-                <div className="absolute top-0 right-0 w-64 h-64 bg-primary/5 rounded-full -translate-y-1/2 translate-x-1/2 blur-3xl"></div>
+            <div className="animate-slide-up bg-white p-12 rounded-[48px] shadow-2xl relative overflow-hidden">
+              <h2 className="text-3xl font-bold text-primary mb-8">{editingHotelId ? 'Edit Hotel' : 'New Hotel'}</h2>
+              <form onSubmit={handleHotelSubmit} className="space-y-8">
+                <div className="grid grid-cols-2 gap-8">
+                  <div><label>Name</label><input type="text" value={hotelForm.name} onChange={e=>setHotelForm({...hotelForm, name: e.target.value})} className="w-full border p-3 rounded-xl" required/></div>
+                  <div><label>Location</label><input type="text" value={hotelForm.location} onChange={e=>setHotelForm({...hotelForm, location: e.target.value})} className="w-full border p-3 rounded-xl" required/></div>
+                  <div><label>Stars</label><input type="number" value={hotelForm.stars} onChange={e=>setHotelForm({...hotelForm, stars: e.target.value})} className="w-full border p-3 rounded-xl" required/></div>
+                  <div><label>Category</label><select value={hotelForm.category} onChange={e=>setHotelForm({...hotelForm, category: e.target.value})} className="w-full border p-3 rounded-xl"><option value="exclusive">Exclusive</option><option value="luxury">Luxury</option></select></div>
+                </div>
+                <div><label>Description</label><textarea value={hotelForm.description} onChange={e=>setHotelForm({...hotelForm, description: e.target.value})} className="w-full border p-3 rounded-xl h-32" required></textarea></div>
+                <ImageUploadField label="Main Image" value={hotelForm.image} onChange={(url)=>setHotelForm({...hotelForm, image: url})} folder="hotels" />
                 
-                <div className="flex items-center justify-between mb-12 relative z-10">
-                  <div>
-                    <h2 className="text-3xl font-serif font-bold text-primary mb-2">{editingHotelId ? 'Edit Hotel' : 'New Hotel'}</h2>
-                    <p className="text-gray-400 font-medium">Manage hotel details and amenities</p>
-                  </div>
-                  <div className="flex gap-3">
-                    {editingHotelId && (
-                      <button type="button" onClick={() => { resetHotelForm(); setActiveTab('hotels'); }} className="px-6 py-2 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-full font-medium transition-colors">
-                        Cancel Edit
-                      </button>
-                    )}
+                <div className="pt-8 border-t">
+                  <h3 className="text-xl font-bold">Photo Gallery</h3>
+                  <div className="space-y-4 mt-4">
+                    {hotelForm.categorizedGallery.map((item, i) => (
+                      <div key={i} className="flex gap-4 items-center bg-gray-50 p-4 rounded-xl">
+                        <select value={item.type} onChange={e=>{
+                          const newGal = [...hotelForm.categorizedGallery]; newGal[i].type = e.target.value; setHotelForm({...hotelForm, categorizedGallery: newGal});
+                        }} className="border p-2 rounded-lg">
+                          <option value="All">All</option><option value="Bedroom">Bedroom</option><option value="Restaurant">Restaurant</option><option value="Panorama">Panorama</option>
+                        </select>
+                        <ImageUploadField value={item.url} onChange={(url)=>{
+                          const newGal = [...hotelForm.categorizedGallery]; newGal[i].url = url; setHotelForm({...hotelForm, categorizedGallery: newGal});
+                        }} folder="hotels/gallery" />
+                        <button type="button" onClick={()=>{
+                          const newGal = hotelForm.categorizedGallery.filter((_, idx)=>idx!=i); setHotelForm({...hotelForm, categorizedGallery: newGal});
+                        }} className="text-red-500 font-bold px-4">X</button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={()=>setHotelForm({...hotelForm, categorizedGallery: [...hotelForm.categorizedGallery, {type: 'All', url: ''}]})} className="text-primary font-bold">+ Add single photo</button>
+                    
+                    <div className="mt-8 pt-8 border-t border-gray-100">
+                      <MultiImageUploadButton folder="hotels/gallery" onUploadComplete={(urls, cat) => {
+                        const newEntries = urls.map(u => ({ type: cat, url: u }));
+                        setHotelForm({...hotelForm, categorizedGallery: [...hotelForm.categorizedGallery, ...newEntries]});
+                      }} />
+                    </div>
                   </div>
                 </div>
-
-                <form onSubmit={handleHotelSubmit} className="space-y-8 relative z-10">
-                  <div className="grid grid-cols-2 gap-8">
-                    <div>
-                      <label className="block text-sm font-bold text-primary mb-2 uppercase tracking-wide">Hotel Name</label>
-                      <input type="text" value={hotelForm.name} onChange={e=>setHotelForm({...hotelForm, name: e.target.value})} className="w-full bg-gray-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium" required/>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-primary mb-2 uppercase tracking-wide">Location</label>
-                      <input type="text" value={hotelForm.location} onChange={e=>setHotelForm({...hotelForm, location: e.target.value})} className="w-full bg-gray-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium" required/>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-primary mb-2 uppercase tracking-wide">Stars</label>
-                      <input type="number" value={hotelForm.stars} onChange={e=>setHotelForm({...hotelForm, stars: e.target.value})} className="w-full bg-gray-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium" required/>
-                    </div>
-                    <div>
-                      <label className="block text-sm font-bold text-primary mb-2 uppercase tracking-wide">Category</label>
-                      <select value={hotelForm.category} onChange={e=>setHotelForm({...hotelForm, category: e.target.value})} className="w-full bg-gray-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium text-gray-600">
-                        <option value="">Select Category</option>
-                        <option value="standard">Standard</option>
-                        <option value="superior">Superior</option>
-                        <option value="luxury">Luxury</option>
-                        <option value="super-luxury">Super luxury</option>
-                        <option value="east-south-coast">Eastcoast & South coast</option>
-                      </select>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-bold text-primary mb-2 uppercase tracking-wide">Description</label>
-                    <textarea value={hotelForm.description} onChange={e=>setHotelForm({...hotelForm, description: e.target.value})} className="w-full bg-gray-50 border-none p-4 rounded-2xl outline-none focus:ring-2 focus:ring-primary/20 transition-all font-medium h-32" required></textarea>
-                  </div>
-                  
-                  <div className="pt-8 border-t border-gray-100">
-                    <h3 className="text-xl font-serif font-bold text-primary mb-4">Amenities Builder</h3>
-                    <div className="space-y-6">
-                      {hotelForm.extendedAmenities.categories.map((cat, catIdx) => (
-                        <div key={catIdx} className="bg-gray-50 p-6 rounded-3xl border border-gray-100">
-                          <div className="flex justify-between items-center mb-6">
-                            <div className="flex gap-4 flex-1">
-                              <input type="text" placeholder="Category Title (e.g. Bathroom)" value={cat.title} onChange={e => {
-                                const newCats = [...hotelForm.extendedAmenities.categories];
-                                newCats[catIdx].title = e.target.value;
-                                setHotelForm({...hotelForm, extendedAmenities: { ...hotelForm.extendedAmenities, categories: newCats }});
-                              }} className="bg-white border-none p-3 rounded-xl flex-1 outline-none focus:ring-2 focus:ring-primary/20 font-medium" />
-                              <input type="text" placeholder="Icon (e.g. 🛁)" value={cat.icon} onChange={e => {
-                                const newCats = [...hotelForm.extendedAmenities.categories];
-                                newCats[catIdx].icon = e.target.value;
-                                setHotelForm({...hotelForm, extendedAmenities: { ...hotelForm.extendedAmenities, categories: newCats }});
-                              }} className="bg-white border-none p-3 rounded-xl w-32 text-center outline-none focus:ring-2 focus:ring-primary/20" />
-                            </div>
-                            <button type="button" onClick={() => {
-                              const newCats = hotelForm.extendedAmenities.categories.filter((_, i) => i !== catIdx);
-                              setHotelForm({...hotelForm, extendedAmenities: { ...hotelForm.extendedAmenities, categories: newCats }});
-                            }} className="text-red-500 ml-4 p-2 hover:bg-red-50 rounded-xl transition-colors">🗑️ Remove</button>
-                          </div>
-                          
-                          <div className="pl-6 border-l-2 border-primary/20 space-y-3">
-                            <label className="text-xs font-bold text-gray-400 uppercase tracking-wider">Category Items</label>
-                            <textarea 
-                              value={(cat.items || []).join('\n')}
-                              onChange={e => {
-                                const newCats = [...hotelForm.extendedAmenities.categories];
-                                newCats[catIdx].items = e.target.value.split('\n');
-                                setHotelForm({...hotelForm, extendedAmenities: { ...hotelForm.extendedAmenities, categories: newCats }});
-                              }}
-                              className="w-full bg-white border border-gray-100 p-4 rounded-xl text-sm outline-none focus:ring-2 focus:ring-primary/20 font-medium min-h-[120px] resize-y shadow-sm placeholder:text-gray-300"
-                              placeholder="Paste multiple items here...&#10;e.g.&#10;Bidet&#10;Towels&#10;Soap"
-                            ></textarea>
-                          </div>
-                        </div>
-                      ))}
-                      
-                      <button type="button" onClick={() => {
-                        const newCats = [...(hotelForm.extendedAmenities.categories || [])];
-                        newCats.push({ title: '', icon: '', items: [] });
-                        setHotelForm({...hotelForm, extendedAmenities: { ...hotelForm.extendedAmenities, categories: newCats }});
-                      }} className="w-full py-4 border-2 border-dashed border-primary/20 rounded-3xl text-primary font-bold hover:bg-primary/5 hover:border-primary/40 transition-all">+ ADD NEW AMENITY CATEGORY</button>
-                    </div>
-                  </div>
-
-                  <ImageUploadField label="Main Image" value={hotelForm.image} onChange={(url)=>setHotelForm({...hotelForm, image: url})} folder="hotels" />
-                  
-                  <div className="pt-8 border-t border-gray-100">
-                    <h3 className="text-xl font-serif font-bold text-primary mb-4">Photo Gallery</h3>
-                    <div className="space-y-4">
-                      {hotelForm.categorizedGallery.map((item, i) => (
-                        <div key={i} className="flex gap-4 items-center bg-gray-50 p-4 rounded-2xl border border-gray-100">
-                          <select value={item.type} onChange={e=>{
-                            const newGal = [...hotelForm.categorizedGallery]; newGal[i].type = e.target.value; setHotelForm({...hotelForm, categorizedGallery: newGal});
-                          }} className="bg-white border-none p-3 rounded-xl outline-none focus:ring-2 focus:ring-primary/20 font-medium">
-                            <option value="All">All</option><option value="Bedroom">Bedroom</option><option value="Restaurant">Restaurant</option><option value="Panorama">Panorama</option>
-                          </select>
-                          <div className="flex-1">
-                            <ImageUploadField value={item.url} onChange={(url)=>{
-                              const newGal = [...hotelForm.categorizedGallery]; newGal[i].url = url; setHotelForm({...hotelForm, categorizedGallery: newGal});
-                            }} folder="hotels/gallery" />
-                          </div>
-                          <button type="button" onClick={()=>{
-                            const newGal = hotelForm.categorizedGallery.filter((_, idx)=>idx!=i); setHotelForm({...hotelForm, categorizedGallery: newGal});
-                          }} className="w-12 h-12 rounded-xl bg-white shadow-sm text-red-500 flex items-center justify-center hover:bg-red-50 transition-colors">🗑️</button>
-                        </div>
-                      ))}
-                      <button type="button" onClick={()=>setHotelForm({...hotelForm, categorizedGallery: [...hotelForm.categorizedGallery, {type: 'All', url: ''}]})} className="text-primary font-bold text-sm bg-primary/5 px-6 py-3 rounded-xl hover:bg-primary/10 transition-colors inline-block">+ Add single photo</button>
-                      
-                      <div className="mt-8 pt-8 border-t border-gray-100">
-                        <MultiImageUploadButton folder="hotels/gallery" onUploadComplete={(urls, cat) => {
-                          const newEntries = urls.map(u => ({ type: cat, url: u }));
-                          setHotelForm({...hotelForm, categorizedGallery: [...hotelForm.categorizedGallery, ...newEntries]});
-                        }} />
-                      </div>
-                    </div>
-                  </div>
-                  
-                  <div className="pt-8 text-right">
-                    <button type="submit" disabled={loading} className="bg-primary text-white px-12 py-4 rounded-full font-bold shadow-xl shadow-primary/20 hover:-translate-y-1 hover:shadow-2xl transition-all">
-                      {loading ? 'Publishing...' : editingHotelId ? 'UPDATE HOTEL' : 'PUBLISH HOTEL'}
-                    </button>
-                  </div>
-                </form>
-              </div>
+                
+                <button type="submit" disabled={loading} className="bg-primary text-white px-12 py-4 rounded-xl font-bold mt-8">{editingHotelId ? 'Update Hotel' : 'Publish Hotel'}</button>
+              </form>
             </div>
           )}
 

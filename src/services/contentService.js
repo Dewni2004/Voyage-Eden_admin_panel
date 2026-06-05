@@ -252,3 +252,62 @@ export const subscribeToNewsletter = async (email) => {
     throw error;
   }
 };
+
+// --- HOTELS ---
+export const getHotels = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('hotels')
+      .select('*')
+      .order('created_at', { ascending: false });
+    
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.error("Error fetching hotels:", error);
+    return [];
+  }
+};
+
+export const addHotel = async (hotelData) => {
+  try {
+    const { data, error } = await supabase
+      .from('hotels')
+      .insert([hotelData])
+      .select();
+    
+    if (error) throw error;
+    return data[0].id;
+  } catch (error) {
+    console.error("Error adding hotel:", error);
+    throw error;
+  }
+};
+
+export const updateHotel = async (id, hotelData) => {
+  try {
+    const { error } = await supabase
+      .from('hotels')
+      .update(hotelData)
+      .eq('id', id);
+    
+    if (error) throw error;
+  } catch (error) {
+    console.error("Error updating hotel:", error);
+    throw error;
+  }
+};
+
+export const deleteHotel = async (id) => {
+  try {
+    const { error } = await supabase
+      .from('hotels')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+  } catch (error) {
+    console.error("Error deleting hotel:", error);
+    throw error;
+  }
+};

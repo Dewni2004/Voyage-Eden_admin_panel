@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import { useRef } from 'react';
 import map from '../../assets/Tra.png';
 
 const MapCoordinatePicker = ({ x, y, onChange, dayNumber }) => {
