@@ -167,7 +167,8 @@ const Admin = () => {
   const translateText = async (text, sl = 'en', tl = 'de', retries = 2) => {
     if (!text || typeof text !== 'string') return text;
     try {
-      const response = await fetch('http://localhost:5000/api/translate', {
+      const BACKEND_URL = import.meta.env.MODE === 'development' ? 'http://localhost:5000/api/translate' : '/api/translate';
+      const response = await fetch(BACKEND_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text, target_lang: tl })
@@ -215,7 +216,8 @@ const Admin = () => {
       const texts = extractStrings(obj);
       if (!texts.length) return obj;
 
-      const response = await fetch('http://localhost:5000/api/translate', {
+      const BACKEND_URL = import.meta.env.MODE === 'development' ? 'http://localhost:5000/api/translate' : '/api/translate';
+      const response = await fetch(BACKEND_URL, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: texts, target_lang: tl })

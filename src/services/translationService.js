@@ -1,4 +1,4 @@
-const BACKEND_URL = 'http://localhost:5000/api/translate';
+const BACKEND_URL = import.meta.env.MODE === 'development' ? 'http://localhost:5000/api/translate' : '/api/translate';
 
 // The target languages for translation
 const TARGET_LANGUAGES = ['EN-US', 'FR', 'DE', 'IT'];
