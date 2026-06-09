@@ -164,29 +164,79 @@ const Admin = () => {
 
   const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-  const translateText = async (text, sl = 'fr', tl = 'de', retries = 1) => {
+  const translateText = async (text, sl = 'en', tl = 'de', retries = 2) => {
     if (!text || typeof text !== 'string') return text;
     try {
-      await sleep(100); 
-      const res = await fetch(`https://translate.googleapis.com/translate_a/single?client=gtx&sl=${sl}&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`);
-      if (res.status === 429) {
-        throw new Error('RATE_LIMIT');
-      }
-      if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
-      const data = await res.json();
-      return data[0].map(item => item[0]).join('');
+      const response = await fetch('http://localhost:5000/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, target_lang: tl })
+      });
+      if (!response.ok) throw new Error('Translation failed');
+      const data = await response.json();
+      return data.translations[0].text;
     } catch (e) {
-      if (e.message === 'RATE_LIMIT') {
-        alert("Google Translate එකෙන් ඔයාව තාවකාලිකව block කරලා තියෙන්නේ. (Too many requests). කරුණාකර විනාඩි 10ක් විතර ඉඳලා ආයෙත් try කරන්න.");
-        throw e;
-      }
       if (retries > 0) {
-        console.warn("Translation failed, retrying after 1s...", e);
         await sleep(1000);
         return translateText(text, sl, tl, retries - 1);
       }
       console.error("Translation error", e);
       return text;
+    }
+  };
+
+  const extractStrings = (obj) => {
+    let strings = [];
+    if (typeof obj === 'string') return [obj];
+    if (Array.isArray(obj)) {
+      obj.forEach(item => strings.push(...extractStrings(item)));
+    } else if (typeof obj === 'object' && obj !== null) {
+      Object.values(obj).forEach(val => strings.push(...extractStrings(val)));
+    }
+    return strings;
+  };
+
+  const rebuildObject = (obj, translatedStrings, state = { index: 0 }) => {
+    if (typeof obj === 'string') return translatedStrings[state.index++];
+    if (Array.isArray(obj)) {
+      return obj.map(item => rebuildObject(item, translatedStrings, state));
+    } else if (typeof obj === 'object' && obj !== null) {
+      const newObj = {};
+      Object.keys(obj).forEach(key => {
+        newObj[key] = rebuildObject(obj[key], translatedStrings, state);
+      });
+      return newObj;
+    }
+    return obj;
+  };
+
+  const translateObject = async (obj, sl = 'en', tl = 'de', retries = 2) => {
+    try {
+      const texts = extractStrings(obj);
+      if (!texts.length) return obj;
+
+      const response = await fetch('http://localhost:5000/api/translate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: texts, target_lang: tl })
+      });
+      if (!response.ok) throw new Error('Translation failed');
+      const data = await response.json();
+      
+      const translatedTexts = data.translations.map(t => t.text);
+      if (translatedTexts.length !== texts.length) {
+         throw new Error("Translation array length mismatch");
+      }
+      
+      return rebuildObject(obj, translatedTexts);
+    } catch (e) {
+      if (retries > 0) {
+        console.warn("Translation failed, retrying...", e);
+        await sleep(2000);
+        return translateObject(obj, sl, tl, retries - 1);
+      }
+      console.error("Translation error", e);
+      return obj;
     }
   };
 
@@ -551,24 +601,41 @@ const Admin = () => {
     setIsTranslating(true);
     setMessage({ type: '', text: '' });
     try {
-      // 1. Translate EN to FR and save to FR Database
-      const frData = { ...articleForm };
-      frData.title = await translateText(articleForm.title, 'en', 'fr');
-      frData.description = await translateText(articleForm.description, 'en', 'fr');
-      frData.excerpt = await translateText(articleForm.excerpt, 'en', 'fr');
-      frData.seo_title = await translateText(articleForm.seo_title, 'en', 'fr');
-      frData.seo_description = await translateText(articleForm.seo_description, 'en', 'fr');
-      frData.seo_keywords = await translateText(articleForm.seo_keywords, 'en', 'fr');
-      
-      frData.content = await Promise.all(contentBlocks.map(async (block) => {
-        if (block.type !== 'image' && block.text) {
-          return { ...block, text: await translateText(block.text, 'en', 'fr') };
-        }
-        return block;
-      }));
-      frData.content = frData.content.filter(b => b.text && b.text.trim() !== '');
-      frData.tags = articleForm.category ? [`#${articleForm.category.replace(/\s+/g, '')}`] : [];
+      // Helper function for translating article
+      const translateArticle = async (sl, tl) => {
+        const dataToTranslate = {
+          title: articleForm.title,
+          description: articleForm.description,
+          excerpt: articleForm.excerpt,
+          seo_title: articleForm.seo_title,
+          seo_description: articleForm.seo_description,
+          seo_keywords: articleForm.seo_keywords,
+          content: contentBlocks.map(block => (block.type !== 'image' && block.text) ? block.text : '')
+        };
+        const translatedData = await translateObject(dataToTranslate, sl, tl);
 
+        const translatedContent = contentBlocks.map((block, idx) => {
+          if (block.type !== 'image' && block.text) {
+             return { ...block, text: translatedData.content?.[idx] || block.text };
+          }
+          return block;
+        }).filter(b => b.text && b.text.trim() !== '');
+
+        return {
+          ...articleForm,
+          title: translatedData.title || articleForm.title,
+          description: translatedData.description || articleForm.description,
+          excerpt: translatedData.excerpt || articleForm.excerpt,
+          seo_title: translatedData.seo_title || articleForm.seo_title,
+          seo_description: translatedData.seo_description || articleForm.seo_description,
+          seo_keywords: translatedData.seo_keywords || articleForm.seo_keywords,
+          content: translatedContent,
+          tags: articleForm.category ? [`#${articleForm.category.replace(/\s+/g, '')}`] : []
+        };
+      };
+
+      // 1. FR Database
+      const frData = await translateArticle('auto', 'fr');
       let newFrId = editingArticleId;
       if (editingArticleId) {
         await updateArticle(editingArticleId, frData);
@@ -576,24 +643,25 @@ const Admin = () => {
         newFrId = await addArticle(frData);
       }
 
-      // 2. Translate EN to DE and save to DE Database
-      const deData = { ...frData, id: newFrId };
-      deData.title = await translateText(articleForm.title, 'en', 'de');
-      deData.description = await translateText(articleForm.description, 'en', 'de');
-      deData.excerpt = await translateText(articleForm.excerpt, 'en', 'de');
-      deData.seo_title = await translateText(articleForm.seo_title, 'en', 'de');
-      deData.seo_description = await translateText(articleForm.seo_description, 'en', 'de');
-      deData.seo_keywords = await translateText(articleForm.seo_keywords, 'en', 'de');
-      
-      deData.content = await Promise.all(contentBlocks.map(async (block) => {
-        if (block.type !== 'image' && block.text) {
-          return { ...block, text: await translateText(block.text, 'en', 'de') };
-        }
-        return block;
-      }));
+      // 2. DE Database
+      const deData = await translateArticle('auto', 'de');
+      deData.id = newFrId;
+      await supabase.from('articles_de').upsert(deData);
 
-      const { error: err } = await supabase.from('articles_de').upsert(deData);
-      if (err) throw err;
+      // 3. IT Database
+      const itData = await translateArticle('auto', 'it');
+      itData.id = newFrId;
+      await supabase.from('articles_it').upsert(itData);
+
+      // 4. ES Database
+      const esData = await translateArticle('auto', 'es');
+      esData.id = newFrId;
+      await supabase.from('articles_es').upsert(esData);
+
+      // 5. EN Database
+      const enData = await translateArticle('auto', 'en');
+      enData.id = newFrId;
+      await supabase.from('articles_en').upsert(enData);
 
       setMessage({ type: 'success', text: 'Article publié en FR et DE depuis l\'Anglais !' });
       resetArticleForm();
@@ -621,25 +689,39 @@ const Admin = () => {
 
       // Helper function for translating review specific fields
       const translateReview = async (sl, tl) => {
+        const dataToTranslate = {
+          headline: reviewForm.headline,
+          text: reviewForm.text,
+          detailedtext: reviewForm.detailedtext,
+          tourdetails: {
+            travelertype: reviewForm.tourdetails.travelertype,
+            group: reviewForm.tourdetails.group
+          },
+          guide: {
+            quote: reviewForm.guide.quote
+          }
+        };
+        const translatedData = await translateObject(dataToTranslate, sl, tl);
+
         return {
           ...baseData,
-          headline: await translateText(reviewForm.headline, sl, tl),
-          text: await translateText(reviewForm.text, sl, tl),
-          detailedtext: await translateText(reviewForm.detailedtext, sl, tl),
+          headline: translatedData.headline || reviewForm.headline,
+          text: translatedData.text || reviewForm.text,
+          detailedtext: translatedData.detailedtext || reviewForm.detailedtext,
           tourdetails: {
             ...reviewForm.tourdetails,
-            travelertype: await translateText(reviewForm.tourdetails.travelertype, sl, tl),
-            group: await translateText(reviewForm.tourdetails.group, sl, tl)
+            travelertype: translatedData.tourdetails?.travelertype || reviewForm.tourdetails.travelertype,
+            group: translatedData.tourdetails?.group || reviewForm.tourdetails.group
           },
           guide: {
             ...reviewForm.guide,
-            quote: await translateText(reviewForm.guide.quote, sl, tl)
+            quote: translatedData.guide?.quote || reviewForm.guide.quote
           }
         };
       };
 
       // 1. FR Database (base table)
-      const frForm = await translateReview('en', 'fr');
+      const frForm = await translateReview('auto', 'fr');
       let newId = editingReviewId;
       if (editingReviewId) {
         await updateReview(editingReviewId, frForm);
@@ -648,21 +730,22 @@ const Admin = () => {
       }
 
       // 2. EN Database
-      const enForm = { ...baseData, id: newId };
+      const enForm = await translateReview('auto', 'en');
+      enForm.id = newId;
       await supabase.from('reviews_en').upsert(enForm);
 
       // 3. DE Database
-      const deForm = await translateReview('en', 'de');
+      const deForm = await translateReview('auto', 'de');
       deForm.id = newId;
       await supabase.from('reviews_de').upsert(deForm);
 
       // 4. IT Database
-      const itForm = await translateReview('en', 'it');
+      const itForm = await translateReview('auto', 'it');
       itForm.id = newId;
       await supabase.from('reviews_it').upsert(itForm);
 
       // 5. ES Database
-      const esForm = await translateReview('en', 'es');
+      const esForm = await translateReview('auto', 'es');
       esForm.id = newId;
       await supabase.from('reviews_es').upsert(esForm);
 
@@ -691,34 +774,42 @@ const Admin = () => {
       };
 
       const translateItinerary = async (sl, tl) => {
-        const result = {
-          ...baseData,
-          title: await translateText(itineraryForm.title, sl, tl),
-          description: await translateText(itineraryForm.description, sl, tl),
-          effort: await translateText(itineraryForm.effort, sl, tl),
-          group: await translateText(itineraryForm.group, sl, tl),
-          seo_title: await translateText(itineraryForm.seo_title, sl, tl),
-          seo_description: await translateText(itineraryForm.seo_description, sl, tl),
-          seo_keywords: await translateText(itineraryForm.seo_keywords, sl, tl),
-          days: []
+        // Send the entire object to Gemini in one request to save Rate Limits
+        const dataToTranslate = {
+          title: itineraryForm.title,
+          description: itineraryForm.description,
+          effort: itineraryForm.effort,
+          group: itineraryForm.group,
+          seo_title: itineraryForm.seo_title,
+          seo_description: itineraryForm.seo_description,
+          seo_keywords: itineraryForm.seo_keywords,
+          days: itineraryDays.map(day => ({
+            location: day.location,
+            description: day.description,
+            highlights: day.highlights,
+            accommodation: day.accommodation,
+            meals: day.meals,
+            travel: day.travel,
+            displayLabel: day.displayLabel
+          }))
         };
-        for (const day of itineraryDays) {
+        
+        const translatedData = await translateObject(dataToTranslate, sl, tl);
+        
+        // Merge translated data with original structure
+        const result = { ...baseData, ...translatedData, days: [] };
+        
+        for (let i = 0; i < itineraryDays.length; i++) {
           result.days.push({
-            ...day,
-            location: await translateText(day.location, sl, tl),
-            description: await translateText(day.description, sl, tl),
-            highlights: await translateText(day.highlights, sl, tl),
-            accommodation: await translateText(day.accommodation, sl, tl),
-            meals: await translateText(day.meals, sl, tl),
-            travel: await translateText(day.travel, sl, tl),
-            displayLabel: await translateText(day.displayLabel, sl, tl)
+            ...itineraryDays[i],
+            ...(translatedData.days && translatedData.days[i] ? translatedData.days[i] : {})
           });
         }
         return result;
       };
 
       // 1. FR Database (base table)
-      const frData = await translateItinerary('en', 'fr');
+      const frData = await translateItinerary('auto', 'fr');
       let newId = editingItineraryId;
       if (editingItineraryId) {
         await updateItinerary(editingItineraryId, frData);
@@ -727,21 +818,22 @@ const Admin = () => {
       }
 
       // 2. EN Database
-      const enData = { ...baseData, id: newId, days: itineraryDays };
+      const enData = await translateItinerary('auto', 'en');
+      enData.id = newId;
       await supabase.from('itineraries_en').upsert(enData);
 
       // 3. DE Database
-      const deData = await translateItinerary('en', 'de');
+      const deData = await translateItinerary('auto', 'de');
       deData.id = newId;
       await supabase.from('itineraries_de').upsert(deData);
 
       // 4. IT Database
-      const itData = await translateItinerary('en', 'it');
+      const itData = await translateItinerary('auto', 'it');
       itData.id = newId;
       await supabase.from('itineraries_it').upsert(itData);
 
       // 5. ES Database
-      const esData = await translateItinerary('en', 'es');
+      const esData = await translateItinerary('auto', 'es');
       esData.id = newId;
       await supabase.from('itineraries_es').upsert(esData);
 
@@ -942,49 +1034,12 @@ const Admin = () => {
 
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    try {
-      if (editingReviewId) {
-        await updateReview(editingReviewId, reviewForm);
-        setMessage({ type: 'success', text: 'Review updated successfully!' });
-      } else {
-        await addReview(reviewForm);
-        setMessage({ type: 'success', text: 'Review added successfully!' });
-      }
-      resetReviewForm();
-      fetchContent();
-      setActiveTab('reviews');
-    } catch (error) {
-      console.error(error);
-      setMessage({ type: 'error', text: `Failed: ${error.message}` });
-    }
-    setLoading(false);
+    await handleEnglishToBothReview();
   };
 
   const handleItinerarySubmit = async (e) => {
     e.preventDefault();
-    setLoading(true);
-    try {
-      const data = { 
-        ...itineraryForm, 
-        days: itineraryDays,
-        icons: itineraryForm.icons.split(',').map(i => i.trim()).filter(i => i !== '')
-      };
-      if (editingItineraryId) {
-        await updateItinerary(editingItineraryId, data);
-        setMessage({ type: 'success', text: 'Itinerary updated successfully!' });
-      } else {
-        await addItinerary(data);
-        setMessage({ type: 'success', text: 'Itinerary published successfully!' });
-      }
-      resetItineraryForm();
-      fetchContent();
-      setActiveTab('itineraries');
-    } catch (error) {
-      console.error(error);
-      setMessage({ type: 'error', text: `Failed: ${error.message}` });
-    }
-    setLoading(false);
+    await handleEnglishToBothItinerary();
   };
 
   const handleCategorySubmit = async (e) => {
