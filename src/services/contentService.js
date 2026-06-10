@@ -48,12 +48,10 @@ export const updateReview = async (id, reviewData) => {
 
 export const deleteReview = async (id) => {
   try {
-    const { error } = await supabase
-      .from('reviews')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
+    const tables = ['reviews', 'reviews_en', 'reviews_de', 'reviews_it', 'reviews_es'];
+    for (const table of tables) {
+      await supabase.from(table).delete().eq('id', id);
+    }
   } catch (error) {
     console.error("Error deleting review:", error);
     throw error;
@@ -107,12 +105,10 @@ export const updateItinerary = async (id, itineraryData) => {
 
 export const deleteItinerary = async (id) => {
   try {
-    const { error } = await supabase
-      .from('itineraries')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
+    const tables = ['itineraries', 'itineraries_en', 'itineraries_de', 'itineraries_it', 'itineraries_es'];
+    for (const table of tables) {
+      await supabase.from(table).delete().eq('id', id);
+    }
   } catch (error) {
     console.error("Error deleting itinerary:", error);
     throw error;
@@ -167,12 +163,10 @@ export const updateArticle = async (id, articleData) => {
 
 export const deleteArticle = async (id) => {
   try {
-    const { error } = await supabase
-      .from('articles')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
+    const tables = ['articles', 'articles_en', 'articles_de', 'articles_it', 'articles_es'];
+    for (const table of tables) {
+      await supabase.from(table).delete().eq('id', id);
+    }
   } catch (error) {
     console.error("Error deleting article:", error);
     throw error;
@@ -300,12 +294,10 @@ export const updateHotel = async (id, hotelData) => {
 
 export const deleteHotel = async (id) => {
   try {
-    const { error } = await supabase
-      .from('hotels')
-      .delete()
-      .eq('id', id);
-    
-    if (error) throw error;
+    const tables = ['hotels', 'hotels_en', 'hotels_de', 'hotels_it', 'hotels_es'];
+    for (const table of tables) {
+      await supabase.from(table).delete().eq('id', id);
+    }
   } catch (error) {
     console.error("Error deleting hotel:", error);
     throw error;
