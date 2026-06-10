@@ -5,7 +5,7 @@ import { supabase } from "../supabase";
 export const getReviews = async () => {
   try {
     const { data, error } = await supabase
-      .from('reviews')
+      .from('reviews_es')
       .select('*')
       .order('created_at', { ascending: false });
     
@@ -64,7 +64,7 @@ export const deleteReview = async (id) => {
 export const getItineraries = async () => {
   try {
     const { data, error } = await supabase
-      .from('itineraries')
+      .from('itineraries_es')
       .select('*')
       .order('created_at', { ascending: false });
     
@@ -124,7 +124,7 @@ export const deleteItinerary = async (id) => {
 export const getArticles = async () => {
   try {
     const { data, error } = await supabase
-      .from('articles')
+      .from('articles_es')
       .select('*')
       .order('created_at', { ascending: false });
     
@@ -257,7 +257,7 @@ export const subscribeToNewsletter = async (email) => {
 export const getHotels = async () => {
   try {
     const { data, error } = await supabase
-      .from('hotels')
+      .from('hotels_es')
       .select('*')
       .order('created_at', { ascending: false });
     

@@ -746,8 +746,15 @@ const Admin = () => {
       itForm.id = newId;
       await supabase.from('reviews_it').upsert(itForm);
 
-      // 5. ES Database
-      const esForm = await translateReview('auto', 'es');
+      // 5. ES Database (Original Spanish data without translation)
+      const esForm = {
+        ...baseData,
+        headline: reviewForm.headline,
+        text: reviewForm.text,
+        detailedtext: reviewForm.detailedtext,
+        tourdetails: reviewForm.tourdetails,
+        guide: reviewForm.guide
+      };
       esForm.id = newId;
       await supabase.from('reviews_es').upsert(esForm);
 
@@ -834,8 +841,8 @@ const Admin = () => {
       itData.id = newId;
       await supabase.from('itineraries_it').upsert(itData);
 
-      // 5. ES Database
-      const esData = await translateItinerary('auto', 'es');
+      // 5. ES Database (Original Spanish data without translation)
+      const esData = { ...baseData, days: itineraryDays };
       esData.id = newId;
       await supabase.from('itineraries_es').upsert(esData);
 
@@ -1008,7 +1015,18 @@ const Admin = () => {
       const enData = await translateFullData('en');
       const deData = await translateFullData('de');
       const itData = await translateFullData('it');
-      const esData = await translateFullData('es');
+      
+      // Original Spanish data without translation
+      const esData = {
+        ...baseData,
+        title: articleForm.title,
+        description: articleForm.description,
+        excerpt: articleForm.excerpt,
+        seo_title: articleForm.seo_title,
+        seo_description: articleForm.seo_description,
+        seo_keywords: articleForm.seo_keywords,
+        content: data.content
+      };
 
       let newId = editingArticleId;
       if (editingArticleId) {

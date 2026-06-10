@@ -18,7 +18,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'dist')));
 
 const DEEPL_API_KEY = process.env.DEEPL_API_KEY;
-const DEEPL_API_URL = 'https://api-free.deepl.com/v2/translate';
+const DEEPL_API_URL = 'https://api.deepl.com/v2/translate';
 
 app.post('/api/translate', async (req, res) => {
     const { text, target_lang } = req.body;
@@ -36,8 +36,7 @@ app.post('/api/translate', async (req, res) => {
             },
             body: JSON.stringify({
                 text: Array.isArray(text) ? text : [text],
-                target_lang: target_lang,
-                source_lang: 'ES',
+                target_lang: target_lang
             }),
         });
 
