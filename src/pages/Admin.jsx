@@ -44,6 +44,7 @@ const Admin = () => {
   const [loading, setLoading] = useState(false);
   const [isTranslating, setIsTranslating] = useState(false);
   const [message, setMessage] = useState({ type: '', text: '' });
+  const [skipTranslation, setSkipTranslation] = useState(false);
 
   // Published content
   const [publishedArticles, setPublishedArticles] = useState([]);
@@ -975,13 +976,39 @@ const Admin = () => {
   const handleArticleSubmit = async (e) => {
     e.preventDefault();
     if (!articleForm.title) return setMessage({ type: 'error', text: 'Article Title required.' });
-    setLoading(true); setIsTranslating(true); setMessage({ type: '', text: 'Translating and Publishing to all languages...' });
+    setLoading(true);
     try {
       const data = {
         ...articleForm,
         content: contentBlocks.filter(b => b.text.trim() !== ''),
         tags: articleForm.category ? [`#${articleForm.category.replace(/\s+/g, '')}`] : []
       };
+
+      if (skipTranslation && editingArticleId) {
+        const tables = ['articles', 'articles_en', 'articles_de', 'articles_it', 'articles_es'];
+        for (const table of tables) {
+          await supabase
+            .from(table)
+            .update({
+              image: articleForm.image,
+              category: articleForm.category,
+              author: articleForm.author,
+              date: articleForm.date,
+              tags: data.tags
+            })
+            .eq('id', editingArticleId);
+        }
+        setMessage({ type: 'success', text: 'Article updated across all languages (Translation skipped)!' });
+        resetArticleForm();
+        fetchContent();
+        setActiveTab('articles');
+        setSkipTranslation(false);
+        setLoading(false);
+        return;
+      }
+
+      setIsTranslating(true); 
+      setMessage({ type: '', text: 'Translating and Publishing to all languages...' });
 
       const translateContent = async (blocks, tl) => {
         return await Promise.all(blocks.map(async (block) => {
@@ -1866,6 +1893,21 @@ const Admin = () => {
                       </div>
                     </div>
                   </div>
+
+                  {editingArticleId && (
+                    <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 mt-8">
+                      <input 
+                        type="checkbox" 
+                        id="skipTranslation"
+                        checked={skipTranslation} 
+                        onChange={(e) => setSkipTranslation(e.target.checked)} 
+                        className="accent-primary w-5 h-5 rounded cursor-pointer" 
+                      />
+                      <label htmlFor="skipTranslation" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                        පරිවර්තනය නොකර සුරකින්න / Skip Translation (Only update cover image & metadata in all languages)
+                      </label>
+                    </div>
+                  )}
 
                   <button disabled={loading} className="w-full bg-primary text-white font-bold py-6 rounded-[24px] shadow-2xl shadow-primary/30 transition-all hover:bg-primary/90 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 mt-12 text-sm tracking-[0.2em]">
                     {loading ? 'PROCESSING...' : editingArticleId ? 'SAVE CHANGES' : 'PUBLISH GUIDE'}
