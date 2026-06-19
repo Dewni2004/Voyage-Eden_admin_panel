@@ -508,8 +508,8 @@ const Admin = () => {
       img: review.img || '',
       rating: review.rating || 5,
       headline: review.headline || '',
-      detailedtext: '',
-      gallery: ['', '', '', ''],
+      detailedtext: review.detailedtext || '',
+      gallery: review.gallery || ['', '', '', ''],
       tourdetails: review.tourdetails || { date: '', travelertype: 'Couple', group: 'Private' },
       guide: review.guide || { name: 'Hasindu', photo: '', rating: 5, quote: '' }
     });
