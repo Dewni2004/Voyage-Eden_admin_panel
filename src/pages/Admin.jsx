@@ -1904,7 +1904,7 @@ const Admin = () => {
                         className="accent-primary w-5 h-5 rounded cursor-pointer" 
                       />
                       <label htmlFor="skipTranslation" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-                        පරිවර්තනය නොකර සුරකින්න / Skip Translation (Only update cover image & metadata in all languages)
+                        Skip Translation (Only update cover image & metadata in all languages)
                       </label>
                     </div>
                   )}
