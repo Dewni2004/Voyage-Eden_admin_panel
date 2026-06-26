@@ -1081,6 +1081,34 @@ const Admin = () => {
 
   const handleReviewSubmit = async (e) => {
     e.preventDefault();
+    if (skipTranslation && editingReviewId) {
+      setLoading(true);
+      try {
+        const tables = ['reviews', 'reviews_en', 'reviews_de', 'reviews_it', 'reviews_es'];
+        for (const table of tables) {
+          await supabase
+            .from(table)
+            .update({
+              img: reviewForm.img,
+              name: reviewForm.name,
+              date: reviewForm.date,
+              rating: reviewForm.rating,
+              gallery: reviewForm.gallery
+            })
+            .eq('id', editingReviewId);
+        }
+        setMessage({ type: 'success', text: 'Review updated across all languages (Translation skipped)!' });
+        resetReviewForm();
+        fetchContent();
+        setActiveTab('reviews');
+        setSkipTranslation(false);
+      } catch (error) {
+        console.error(error);
+        setMessage({ type: 'error', text: `Failed: ${error.message}` });
+      }
+      setLoading(false);
+      return;
+    }
     await handleEnglishToBothReview();
   };
 
@@ -2017,6 +2045,21 @@ const Admin = () => {
                       </div>
                     </div>
                   </div>
+
+                  {editingReviewId && (
+                    <div className="flex items-center gap-3 p-4 bg-gray-50 rounded-2xl border border-gray-100 mt-8">
+                      <input 
+                        type="checkbox" 
+                        id="skipTranslationReview"
+                        checked={skipTranslation} 
+                        onChange={(e) => setSkipTranslation(e.target.checked)} 
+                        className="accent-primary w-5 h-5 rounded cursor-pointer" 
+                      />
+                      <label htmlFor="skipTranslationReview" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                        Skip Translation (Only update cover image & metadata in all languages)
+                      </label>
+                    </div>
+                  )}
 
                   <button disabled={loading} className="w-full bg-primary text-white font-bold py-6 rounded-[24px] shadow-2xl shadow-primary/30 transition-all hover:bg-primary/90 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-70 mt-12 text-sm tracking-[0.2em]">
                     {loading ? 'STORING...' : editingReviewId ? 'UPDATE STORY' : 'POST EXPERIENCE'}
